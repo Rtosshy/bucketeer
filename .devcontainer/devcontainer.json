@@ -9,6 +9,11 @@
     "seccomp:unconfined"
   ],
   "init": true,
+  "features": {
+    "ghcr.io/devcontainers/features/sshd:1": {
+      "version": "latest"
+    }
+  },
   "runArgs": [
     "--cgroupns=host"
   ],
