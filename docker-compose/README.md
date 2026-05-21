@@ -63,6 +63,7 @@ The Docker Compose setup provides an alternative to the Minikube deployment for 
 ### Infrastructure Services
 - **MySQL 8.0**: Primary database (port 3306)
 - **Redis 7**: Cache and pub/sub messaging (port 6379)
+- **Google Cloud Pub/Sub Emulator**: Local Pub/Sub emulator (port 8089)
 - **Nginx**: Reverse proxy for routing (ports 80, 443)
 
 ### Application Services
@@ -392,7 +393,7 @@ make start-docker-compose
 - **No Kubernetes**: Uses Docker Compose instead of Minikube/Kubernetes
 - **Simpler networking**: Direct container-to-container communication
 - **Local storage**: Uses Docker volumes instead of persistent volumes
-- **Redis Streams**: Uses Redis Streams for pub/sub instead of Google Pub/Sub emulator
+- **Pub/Sub**: Uses Redis Streams by default. Set `BUCKETEER_PUBSUB_TYPE=google` in `docker-compose/.env` to use the Google Cloud Pub/Sub emulator.
 - **No BigQuery emulator**: Events are processed but not stored in BigQuery
 - **TLS between services**: All internal gRPC communication between services is secured with TLS. Nginx proxy also connects to backends using TLS.
 
@@ -427,4 +428,4 @@ When making changes to the Docker Compose setup:
 1. Test with `make docker-compose-up`
 2. Verify all services start correctly
 3. Run E2E tests to ensure functionality
-4. Update this README if adding new services or configuration options 
+4. Update this README if adding new services or configuration options
