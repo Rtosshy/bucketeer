@@ -76,6 +76,30 @@ services:
     networks:
       - bucketeer
 
+  # Google Cloud Pub/Sub emulator
+  pubsub:
+    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:${GOOGLE_CLOUD_SDK_VERSION:-545.0.0}
+    container_name: bucketeer-pubsub
+    command:
+      - gcloud
+      - beta
+      - emulators
+      - pubsub
+      - start
+      - --host-port=0.0.0.0:8089
+      - --project=bucketeer-dev
+    ports:
+      - "8089:8089"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.create_connection(('localhost', 8089), 5); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - bucketeer
+    restart: unless-stopped
+
   # Database migration service
   migration:
     image: ghcr.io/bucketeer-io/bucketeer-migration:${BUCKETEER_MIGRATION_VERSION:-localenv}
@@ -101,6 +125,8 @@ services:
     depends_on:
       migration:
         condition: service_completed_successfully
+      pubsub:
+        condition: service_healthy
     command: ["server"]
     environment:
       - BUCKETEER_TEST_ENABLED=true
@@ -125,13 +151,14 @@ services:
       - BUCKETEER_WEB_NON_PERSISTENT_REDIS_POOL_MAX_IDLE=25
       - BUCKETEER_WEB_NON_PERSISTENT_REDIS_POOL_MAX_ACTIVE=25
       - BUCKETEER_WEB_NON_PERSISTENT_REDIS_MODE=auto
-      - BUCKETEER_WEB_PUBSUB_TYPE=redis-stream
+      - BUCKETEER_WEB_PUBSUB_TYPE=${BUCKETEER_PUBSUB_TYPE:-redis-stream}
       - BUCKETEER_WEB_PUBSUB_REDIS_SERVER_NAME=non-persistent-redis
       - BUCKETEER_WEB_PUBSUB_REDIS_ADDR=redis:6379
       - BUCKETEER_WEB_PUBSUB_REDIS_POOL_SIZE=25
       - BUCKETEER_WEB_PUBSUB_REDIS_MIN_IDLE=25
       - BUCKETEER_WEB_PUBSUB_REDIS_PARTITION_COUNT=16
       - BUCKETEER_WEB_PUBSUB_REDIS_MODE=auto
+      - PUBSUB_EMULATOR_HOST=${PUBSUB_EMULATOR_HOST:-pubsub:8089}
       - BUCKETEER_WEB_PROJECT=bucketeer-dev
       - BUCKETEER_WEB_BIGQUERY_DATA_SET=bucketeer
       - BUCKETEER_WEB_BIGQUERY_DATA_LOCATION=bucketeer
@@ -232,13 +259,14 @@ services:
       - BUCKETEER_API_REDIS_POOL_MAX_IDLE=25
       - BUCKETEER_API_REDIS_POOL_MAX_ACTIVE=25
       - BUCKETEER_API_REDIS_MODE=auto
-      - BUCKETEER_API_PUBSUB_TYPE=redis-stream
+      - BUCKETEER_API_PUBSUB_TYPE=${BUCKETEER_PUBSUB_TYPE:-redis-stream}
       - BUCKETEER_API_PUBSUB_REDIS_SERVER_NAME=non-persistent-redis
       - BUCKETEER_API_PUBSUB_REDIS_ADDR=redis:6379
       - BUCKETEER_API_PUBSUB_REDIS_POOL_SIZE=25
       - BUCKETEER_API_PUBSUB_REDIS_MIN_IDLE=25
       - BUCKETEER_API_PUBSUB_REDIS_PARTITION_COUNT=16
       - BUCKETEER_API_PUBSUB_REDIS_MODE=auto
+      - PUBSUB_EMULATOR_HOST=${PUBSUB_EMULATOR_HOST:-pubsub:8089}
       - BUCKETEER_API_OLDEST_EVENT_TIMESTAMP=24h
       - BUCKETEER_API_FURTHEST_EVENT_TIMESTAMP=24h
       - BUCKETEER_API_FEATURES_MEMORY_CACHE_TTL=1m
@@ -313,12 +341,14 @@ services:
       - BUCKETEER_BATCH_NON_PERSISTENT_REDIS_POOL_MAX_IDLE=25
       - BUCKETEER_BATCH_NON_PERSISTENT_REDIS_POOL_MAX_ACTIVE=25
       - BUCKETEER_BATCH_NON_PERSISTENT_REDIS_MODE=auto
-      - BUCKETEER_BATCH_PUBSUB_TYPE=redis-stream
+      - BUCKETEER_BATCH_PUBSUB_TYPE=${BUCKETEER_PUBSUB_TYPE:-redis-stream}
       - BUCKETEER_BATCH_PUBSUB_REDIS_SERVER_NAME=non-persistent-redis
       - BUCKETEER_BATCH_PUBSUB_REDIS_ADDR=redis:6379
       - BUCKETEER_BATCH_PUBSUB_REDIS_POOL_SIZE=25
       - BUCKETEER_BATCH_PUBSUB_REDIS_MIN_IDLE=25
       - BUCKETEER_BATCH_PUBSUB_REDIS_PARTITION_COUNT=16
+      - BUCKETEER_BATCH_PUBSUB_REDIS_MODE=auto
+      - PUBSUB_EMULATOR_HOST=${PUBSUB_EMULATOR_HOST:-pubsub:8089}
       - BUCKETEER_BATCH_PORT=9000
       - BUCKETEER_BATCH_GRPC_GATEWAY_PORT=9089
       - BUCKETEER_BATCH_METRICS_PORT=9002
@@ -395,12 +425,14 @@ services:
       - BUCKETEER_SUBSCRIBER_NON_PERSISTENT_REDIS_POOL_MAX_IDLE=25
       - BUCKETEER_SUBSCRIBER_NON_PERSISTENT_REDIS_POOL_MAX_ACTIVE=25
       - BUCKETEER_SUBSCRIBER_NON_PERSISTENT_REDIS_MODE=auto
-      - BUCKETEER_SUBSCRIBER_PUBSUB_TYPE=redis-stream
+      - BUCKETEER_SUBSCRIBER_PUBSUB_TYPE=${BUCKETEER_PUBSUB_TYPE:-redis-stream}
       - BUCKETEER_SUBSCRIBER_PUBSUB_REDIS_SERVER_NAME=non-persistent-redis
       - BUCKETEER_SUBSCRIBER_PUBSUB_REDIS_ADDR=redis:6379
       - BUCKETEER_SUBSCRIBER_PUBSUB_REDIS_POOL_SIZE=25
       - BUCKETEER_SUBSCRIBER_PUBSUB_REDIS_MIN_IDLE=25
       - BUCKETEER_SUBSCRIBER_PUBSUB_REDIS_PARTITION_COUNT=16
+      - BUCKETEER_SUBSCRIBER_PUBSUB_REDIS_MODE=auto
+      - PUBSUB_EMULATOR_HOST=${PUBSUB_EMULATOR_HOST:-pubsub:8089}
       - BUCKETEER_SUBSCRIBER_PORT=9000
       - BUCKETEER_SUBSCRIBER_METRICS_PORT=9002
       - BUCKETEER_SUBSCRIBER_REFRESH_INTERVAL=10m
@@ -536,4 +568,4 @@ volumes:
 
 networks:
   bucketeer:
-    driver: bridge 
+    driver: bridge
