@@ -95,6 +95,8 @@ type server struct {
 	webURL           *string
 	emailConfigPath  *string
 	demoSiteEnabled  *bool
+	// Demo site
+	demoOrganizationCreationNotifierSlackWebhookURL *string
 	// Encryption of secrets stored at rest
 	encryptionType    *string
 	encryptionKeyID   *string
@@ -171,6 +173,11 @@ func RegisterCommand(r cli.CommandRegistry, p cli.ParentCommand) cli.Command {
 		serviceTokenPath: cmd.Flag("service-token", "Path to service token.").Required().String(),
 		webURL:           cmd.Flag("web-url", "Web console URL.").Required().String(),
 		emailConfigPath:  cmd.Flag("email-config-path", "Path to email config.").Required().String(),
+		demoOrganizationCreationNotifierSlackWebhookURL: cmd.Flag(
+			"demo-organization-creation-notifier-slack-webhook-url",
+			"Slack webhook URL of the demo organization creation notifier. "+
+				"When set, it is used instead of the webhook URL in the processors config.",
+		).String(),
 		encryptionType: cmd.Flag(
 			"encryption-type",
 			"Encryption of stored secrets such as FCM service accounts (none, aead-local). "+
@@ -388,7 +395,7 @@ func (s *server) Run(ctx context.Context, metrics metrics.Metrics, logger *zap.L
 	var pushStorage pushstorage.PushStorage
 	var segmentStorage v2fs.SegmentStorage
 	var segmentUserStorage v2fs.SegmentUserStorage
-	var fluiStorage v2fs.FeatureLastUsedInfoStorage
+	var featureStorage v2fs.FeatureStorage
 	var accountStorage accstorage.AccountStorage
 	var holdoutStorage v2hs.HoldoutStorage
 	var auditLogStorage v2als.AuditLogStorage
@@ -406,7 +413,7 @@ func (s *server) Run(ctx context.Context, metrics metrics.Metrics, logger *zap.L
 		pushStorage = pushstorage.NewPostgresPushStorage(postgresClient)
 		segmentStorage = featurepostgres.NewSegmentStorage(postgresClient)
 		segmentUserStorage = featurepostgres.NewSegmentUserStorage(postgresClient)
-		fluiStorage = featurepostgres.NewFeatureLastUsedInfoStorage(postgresClient)
+		featureStorage = featurepostgres.NewFeatureStorage(postgresClient)
 		accountStorage = accountpostgres.NewAccountStorage(postgresClient)
 		holdoutStorage = holdoutpostgres.NewHoldoutStorage(postgresClient)
 		auditLogStorage = auditlogpostgres.NewAuditLogStorage(postgresClient)
@@ -417,7 +424,7 @@ func (s *server) Run(ctx context.Context, metrics metrics.Metrics, logger *zap.L
 		pushStorage = pushstorage.NewMySQLPushStorage(mysqlClient)
 		segmentStorage = featuremysql.NewSegmentStorage(mysqlClient)
 		segmentUserStorage = featuremysql.NewSegmentUserStorage(mysqlClient)
-		fluiStorage = featuremysql.NewFeatureLastUsedInfoStorage(mysqlClient)
+		featureStorage = featuremysql.NewFeatureStorage(mysqlClient)
 		accountStorage = accountmysql.NewAccountStorage(mysqlClient)
 		holdoutStorage = holdoutmysql.NewHoldoutStorage(mysqlClient)
 		auditLogStorage = auditlogmysql.NewAuditLogStorage(mysqlClient)
@@ -582,7 +589,7 @@ func (s *server) Run(ctx context.Context, metrics metrics.Metrics, logger *zap.L
 		dbClient,
 		segmentStorage,
 		segmentUserStorage,
-		fluiStorage,
+		featureStorage,
 		pushStorage,
 		auditLogStorage,
 		accountStorage,
@@ -1114,7 +1121,7 @@ func (s *server) registerPubSubProcessorMap(
 	dbClient database.Client,
 	segmentStorage v2fs.SegmentStorage,
 	segmentUserStorage v2fs.SegmentUserStorage,
-	fluiStorage v2fs.FeatureLastUsedInfoStorage,
+	featureStorage v2fs.FeatureStorage,
 	pushStorage pushstorage.PushStorage,
 	auditLogStorage v2als.AuditLogStorage,
 	accountStorage accstorage.AccountStorage,
@@ -1203,6 +1210,7 @@ func (s *server) registerPubSubProcessorMap(
 			demoOrganizationCreationNotifier := processor.NewDemoOrganizationCreationNotifier(
 				processorsConfigMap[processor.DemoOrganizationCreationNotifierName],
 				*s.webURL,
+				*s.demoOrganizationCreationNotifierSlackWebhookURL,
 				logger,
 			)
 			processors.RegisterProcessor(
@@ -1237,7 +1245,7 @@ func (s *server) registerPubSubProcessorMap(
 		evaluationCountEventPersister, err := processor.NewEvaluationCountEventPersister(
 			ctx,
 			processorsConfigMap[processor.EvaluationCountEventPersisterName],
-			fluiStorage,
+			featureStorage,
 			redisCache,
 			cachev3.NewUserAttributesCache(redisCache),
 			cachev3.NewDAUCache(redisCache),

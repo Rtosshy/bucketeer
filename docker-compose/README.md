@@ -44,8 +44,8 @@ The Docker Compose setup provides an alternative to the Minikube deployment for 
 │              (Reverse Proxy)            │
 │  Ports: 80 (HTTP), 443 (HTTPS)          │
 │                                         │
-│ - web-gateway.bucketeer.io (HTTPS only) │
-│ - api-gateway.bucketeer.io (HTTPS)      │
+│ - web-gateway.bucketeer.test (HTTPS)    │
+│ - api-gateway.bucketeer.test (HTTPS)    │
 │ - localhost (HTTP for API only)         │
 └─────────────────────────────────────────┘
                     │
@@ -75,10 +75,10 @@ The Docker Compose setup provides an alternative to the Minikube deployment for 
 ## Prerequisites
 
 1. **Docker & Docker Compose**: Ensure you have Docker and Docker Compose installed
-2. **Development Certificates**: The setup requires TLS certificates in `../tools/dev/cert/`
+2. **Development Certificates**: `make docker-compose-setup` generates self-signed TLS certificates in `../tools/dev/cert/` on first run (they are gitignored), so no manual step is needed
 3. **Hosts file**: You need to add the following entry to your `/etc/hosts` file:
    ```
-   127.0.0.1 web-gateway.bucketeer.io
+   127.0.0.1 web-gateway.bucketeer.test
    ```
    
    **Note**: The API service also supports access via `localhost` for local development (no hosts file entry needed).
@@ -91,6 +91,7 @@ The setup uses Docker Compose secrets to securely manage MySQL passwords instead
 
 - **Root Password**: Stored in `./secrets/mysql_root_password.txt`
 - **User Password**: Stored in `./secrets/mysql_password.txt`
+- **Migration Database URL**: Stored in `./secrets/migration_db_url.txt`. The migration service reads the complete URL (user, password, host, port and database name) from this file, so it is not written in `compose.yml`
 - **Automatic Setup**: The `make docker-compose-setup` command automatically creates these secret files
 - **File Permissions**: Secret files are created with `600` permissions (read/write for owner only)
 - **Git Ignored**: The `secrets/` directory is automatically excluded from version control
@@ -99,6 +100,18 @@ To regenerate secrets (if needed):
 ```shell
 make docker-compose-regenerate-secrets
 ```
+
+#### Changing the migration database URL
+
+`make docker-compose-setup` creates `./secrets/migration_db_url.txt` for the bundled MySQL when the file is missing, using the password in `./secrets/mysql_password.txt`. It never overwrites the file, so you can edit it to use another user, password, host, port or database name:
+
+```
+mysql://user:password@host:port/db_name
+```
+
+Percent-encode special characters in the user name and password (for example `@` as `%40` and a space as `%20`). The file is read only by the migration service: the MySQL settings of the `mysql`, `web`, `api`, `batch` and `subscriber` services are set in `compose.yml` and have to be changed there as well. After changing `./secrets/mysql_password.txt`, delete `./secrets/migration_db_url.txt` and run `make docker-compose-setup` again, or edit the password in the URL.
+
+If you start the stack with `docker compose` directly on a checkout that does not have the file yet, run `make docker-compose-setup` once first. `make docker-compose-up` does this for you.
 
 **Note**: The secrets directory is automatically created during setup and is excluded from Git to prevent accidental credential commits.
 
@@ -208,20 +221,20 @@ The services start in the following order:
 
 After starting the services, you can access:
 
-- **Web Dashboard**: https://web-gateway.bucketeer.io
+- **Web Dashboard**: https://web-gateway.bucketeer.test
   - Admin interface for managing feature flags, experiments, etc.
   - Routes internally to Web service gRPC Gateway.
   - **HTTPS only** (requires TLS certificates)
 
 - **API Gateway**: 
-  - **Production/HTTPS**: https://api-gateway.bucketeer.io
-  - **Local Development/HTTP**: http://localhost
+  - **HTTPS**: https://api-gateway.bucketeer.test
+  - **HTTP**: http://localhost
   - SDK and client API endpoints.
   - Routes internally to API service gRPC Gateway.
 
 - **Health Check**:
-  - Web: https://web-gateway.bucketeer.io/health
-  - API: https://api-gateway.bucketeer.io/health or http://localhost/health
+  - Web: https://web-gateway.bucketeer.test/health
+  - API: https://api-gateway.bucketeer.test/health or http://localhost/health
 
 **Note**: All Bucketeer services communicate using HTTPS/TLS internally. Nginx handles SSL termination and routing to the appropriate service ports. For local development, the API service supports HTTP access via localhost to avoid certificate warnings.
 
@@ -245,8 +258,8 @@ The Docker Compose setup uses nginx as a reverse proxy. Internal service archite
 
 **Communication Flow:**
 1. Client/Admin UI → nginx (80/443) via:
-   - Web: `web-gateway.bucketeer.io` (HTTPS only)
-   - API: `api-gateway.bucketeer.io` (HTTPS) or `localhost` (HTTP)
+   - Web: `web-gateway.bucketeer.test` (HTTPS only)
+   - API: `api-gateway.bucketeer.test` (HTTPS) or `localhost` (HTTP)
 2. nginx → API/Web services (gRPC Gateway: 9089, Web health: 8000, API health: 9090)
 3. Services communicate internally via gRPC.
 
@@ -328,7 +341,7 @@ for details and the prebuilt Docker image option.
 
 ### Create API Keys
 ```shell
-WEB_GATEWAY_URL=web-gateway.bucketeer.io \
+WEB_GATEWAY_URL=web-gateway.bucketeer.test \
 WEB_GATEWAY_PORT=443 \
 WEB_GATEWAY_CERT_PATH=$PWD/tools/dev/cert/tls.crt \
 SERVICE_TOKEN_PATH=$PWD/tools/dev/cert/service-token \
@@ -338,7 +351,7 @@ API_KEY_ROLE=SDK_CLIENT \
 ENVIRONMENT_ID=e2e \
 make create-api-key
 
-WEB_GATEWAY_URL=web-gateway.bucketeer.io \
+WEB_GATEWAY_URL=web-gateway.bucketeer.test \
 WEB_GATEWAY_PORT=443 \
 WEB_GATEWAY_CERT_PATH=$PWD/tools/dev/cert/tls.crt \
 SERVICE_TOKEN_PATH=$PWD/tools/dev/cert/service-token \
@@ -353,8 +366,8 @@ make create-api-key
 
 **Using HTTPS (production-like)**:
 ```shell
-WEB_GATEWAY_URL=web-gateway.bucketeer.io \
-GATEWAY_URL=api-gateway.bucketeer.io \
+WEB_GATEWAY_URL=web-gateway.bucketeer.test \
+GATEWAY_URL=api-gateway.bucketeer.test \
 WEB_GATEWAY_PORT=443 \
 GATEWAY_PORT=443 \
 WEB_GATEWAY_CERT_PATH=$PWD/tools/dev/cert/tls.crt \
@@ -369,7 +382,7 @@ make e2e
 
 **Using HTTP for API (local development, no certificates needed)**:
 ```shell
-WEB_GATEWAY_URL=web-gateway.bucketeer.io \
+WEB_GATEWAY_URL=web-gateway.bucketeer.test \
 GATEWAY_URL=localhost \
 WEB_GATEWAY_PORT=443 \
 GATEWAY_PORT=80 \
@@ -387,8 +400,8 @@ make e2e
 ### Common Issues
 
 1. **Port conflicts**: Ensure ports 80, 443, 3306, 6379 are available on your host machine.
-2. **Certificate issues**: Make sure development certificates exist in `../tools/dev/cert/` (required for web service HTTPS).
-3. **`/etc/hosts` not configured**: Ensure `web-gateway.bucketeer.io` is mapped to `127.0.0.1`. API service can be accessed via `localhost` without hosts file configuration.
+2. **Certificate issues**: `make docker-compose-setup` generates the development certificates in `../tools/dev/cert/` (required for web service HTTPS). To regenerate a pair, delete it (`tls.key`/`tls.crt` or `postgres-tls.key`/`postgres-tls.crt`) and run the setup again. The files are bind-mounted individually, so containers created before a pair was (re)generated keep serving the old one: recreate the stack with `make docker-compose-down && make docker-compose-up` (volumes and data are kept).
+3. **`/etc/hosts` not configured**: Ensure `web-gateway.bucketeer.test` is mapped to `127.0.0.1`. API service can be accessed via `localhost` without hosts file configuration.
 4. **Service startup order**: Services have dependencies; wait for each tier to be healthy.
 
 ### Debugging Commands
@@ -431,10 +444,14 @@ docker-compose/
 ├── compose.yml               # Main Docker Compose configuration
 ├── env.default               # Default environment variables
 ├── .gitignore                # Git ignore rules
-├── secrets/                  # MySQL passwords (auto-generated, git-ignored)
+├── secrets/                  # Passwords and the migration database URL (auto-generated, git-ignored)
 │   ├── mysql_root_password.txt
-│   └── mysql_password.txt
+│   ├── mysql_password.txt
+│   ├── postgres_password.txt
+│   └── migration_db_url.txt
 └── config/
+    ├── atlas/                # Migration (Atlas) configuration
+    │   └── atlas.hcl
     ├── nginx/                # Nginx configuration
     │   ├── nginx.conf
     │   └── bucketeer.conf

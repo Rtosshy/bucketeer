@@ -58,10 +58,10 @@ Docker Compose provides the easiest way to deploy Bucketeer for small to medium-
    ```
 
 4. **Access the application**
-   - **Admin Dashboard**: https://web-gateway.bucketeer.io
-   - **API Gateway**: http://localhost (development) or https://api-gateway.bucketeer.io (production)
+   - **Admin Dashboard**: https://web-gateway.bucketeer.test
+   - **API Gateway**: http://localhost or https://api-gateway.bucketeer.test (HTTPS)
    - **Health Checks**:
-     - Web: https://web-gateway.bucketeer.io/health
+     - Web: https://web-gateway.bucketeer.test/health
      - API: http://localhost/health
 
 ### Configuration
@@ -118,12 +118,32 @@ For production deployments, follow these additional steps:
 
 #### 1. Security Configuration
 
-**Set up proper SSL certificates:**
-```bash
-# Replace development certificates with real ones
-cp your-ssl-cert.crt tools/dev/cert/tls.crt
-cp your-ssl-key.key tools/dev/cert/tls.key
-```
+**Use your own TLS certificate:**
+`make docker-compose-up` (and `make deploy-bucketeer` for the minikube/localenv
+cluster) generate self-signed certificates for the local services
+(`tools/dev/cert/tls.key` / `tls.crt`) and the local PostgreSQL
+(`tools/dev/cert/postgres-tls.key` / `postgres-tls.crt`) on first run. These are
+**gitignored** local development material. Do not copy a production certificate or
+key into `tools/dev/cert/`: nothing in that directory must ever be committed, and
+production certificates do not belong in the repository checkout.
+
+For a real deployment, keep the certificate and key outside the repository:
+- Kubernetes: store them in a TLS Secret and point the chart at it instead of the
+  development secrets that `make deploy-bucketeer` creates from `tools/dev/cert`:
+  ```bash
+  kubectl create secret tls bucketeer-service-cert \
+    --cert=your-ssl-cert.crt --key=your-ssl-key.key -n bucketeer
+  ```
+  Set `tls.service.secret` for each service (`web`, `api`, `batch-server` and
+  `subscriber` in the umbrella chart) and the ingress `tls.bucketeerJP.secrets`
+  for `web` and `api` to that Secret.
+- Docker Compose: store them in a directory outside the repository that only the
+  Docker user can read (`chmod 600` on the key) and point every service
+  certificate mount in `docker-compose/compose.yml` at them: the
+  `../tools/dev/cert` directory mount of `nginx` (it reads `tls.crt` / `tls.key`
+  from `/etc/nginx/certs`), the `tls.crt` / `tls.key` file mounts of `web`, `api`,
+  `batch` and `subscriber`, and the `tls.crt` mount of `batch-cron`, which trusts
+  it when calling the batch service.
 
 **Use a dedicated OAuth signing key and service token:**
 For local development, `make docker-compose-up` (and `make deploy-bucketeer` for the
@@ -196,7 +216,16 @@ add_header 'Access-Control-Allow-Origin' 'https://your-domain.com' always;
 mkdir -p docker-compose/secrets
 echo "your-mysql-password" > docker-compose/secrets/mysql_password.txt
 echo "your-mysql-root-password" > docker-compose/secrets/mysql_root_password.txt
+# Database URL of the migration service: user, password, host, port and database name.
+# Percent-encode special characters in the user name and password.
+echo "mysql://user:password@host:port/db_name" > docker-compose/secrets/migration_db_url.txt
+chmod 600 docker-compose/secrets/*.txt
 ```
+
+`make docker-compose-setup` creates `migration_db_url.txt` for the bundled MySQL when
+it is missing and never overwrites it. The migration service reads the whole URL from
+this file; nothing else does, so the MySQL settings of the other services in
+`docker-compose/compose.yml` have to match it.
 
 ```bash
 # For PostgresQL
@@ -213,21 +242,52 @@ container environment values. The exception is the demo sign-in password, which
 `env.js` publishes to the browser by design when the demo sign-in is enabled (see
 above). For the database passwords, the OAuth configuration and the email
 configuration you can also create the Secrets yourself and point the chart at them,
-so those values do not have to appear in a values file:
+so those values do not have to appear in a values file. The same applies to the
+database URL of the migration job:
 - Database passwords: `global.operationalDatabase.mysql.existingSecret` /
   `existingSecretKey` and `global.operationalDatabase.postgres.existingSecret` /
   `existingSecretKey` (each service chart can override them under
   `<chart>.env.operationalDatabase.<engine>`). The password is injected through a
-  `secretKeyRef`; when no existing Secret is set, the chart creates
+  `secretKeyRef`. To keep the user name out of the values file as well, leave `user`
+  empty: the user name of the engine selected by `operationalDatabase.type` is then
+  read from the same Secret under `existingSecretUserKey` (`mysql-user` /
+  `postgres-user` by default). When no existing Secret is set, the chart creates
   `<service>-db-credentials` from `pass`, and changing `pass` rolls the pods. Pods do
-  not restart on their own when the content of an existing Secret changes.
+  not restart on their own when the content of an existing Secret changes. To switch
+  a running release to an existing Secret, set `existingSecret` and keep `pass` for
+  that release: the new pods read the existing Secret, and `<service>-db-credentials`
+  keeps the password so that pods created before the switch can still start (a
+  scale-out or an aborted rollout during the switch). Remove `pass` once the new pods
+  have replaced the previous ones; this rolls the pods once more.
+- Migration database URL: `migration.existingSecret` / `existingSecretKey`
+  (`existingSecret` / `existingSecretKey` in the standalone `bucketeer-migration`
+  chart), a Secret whose key (`db-url` by default) holds the complete URL, for
+  example `mysql://user:password@host:port/db_name`. Percent-encode special
+  characters in the user name and password. Unlike the passwords above,
+  `migration.dbUrl` is not rendered into a Secret: it is passed to the migration job
+  as a plain argument, so it is readable in the Job and in the Helm release. With
+  `existingSecret` the job reads the URL through a `secretKeyRef` and `dbUrl` is
+  ignored. In the `bucketeer` chart the migration job is a pre-install/pre-upgrade
+  hook, so the Secret must exist in the release namespace before Helm runs:
+  ```shell
+  kubectl create secret generic bucketeer-migration-db-url -n bucketeer \
+    --from-literal db-url='mysql://user:password@host:port/db_name'
+  ```
 - OAuth configuration: `web.oauth.existingSecret`, a Secret with an
   `oauth-config.json` key holding the complete `oauth` block as JSON.
 - Email configuration: `global.email.existingSecret`, a Secret with an
   `email-config.json` key holding the complete `global.email` block as JSON.
+- Slack webhook URL of the demo organization creation notifier:
+  `subscriber.processors.demoOrganizationCreationNotifier.notifier.slack.existingSecret`
+  / `existingSecretKey`, a Secret whose key (`slack-webhook-url` by default) holds
+  the webhook URL. It is injected into the subscriber through a `secretKeyRef` and
+  takes precedence over `webhookURL`, which can then stay empty. It is only used
+  when `subscriber.env.demoSiteEnabled` is `true`. Pods do not restart on their own
+  when the content of the Secret changes.
 
-The data warehouse and subscriber processor configurations are always rendered by the
-chart from values; they have no existing-Secret override.
+The data warehouse configuration and the rest of the subscriber processor
+configuration are always rendered by the chart from values; they have no
+existing-Secret override.
 
 **Encrypt stored secrets (FCM service accounts and Slack webhook URLs):**
 Push configurations store a Firebase service-account key and notification
@@ -368,7 +428,7 @@ For E2E testing and SDK integration:
 
 ```bash
 # Create client API key
-WEB_GATEWAY_URL=web-gateway.bucketeer.io \
+WEB_GATEWAY_URL=web-gateway.bucketeer.test \
 WEB_GATEWAY_PORT=443 \
 WEB_GATEWAY_CERT_PATH=$PWD/tools/dev/cert/tls.crt \
 SERVICE_TOKEN_PATH=$PWD/tools/dev/cert/service-token \
@@ -379,7 +439,7 @@ ENVIRONMENT_ID=production \
 make create-api-key
 
 # Create server API key
-WEB_GATEWAY_URL=web-gateway.bucketeer.io \
+WEB_GATEWAY_URL=web-gateway.bucketeer.test \
 WEB_GATEWAY_PORT=443 \
 WEB_GATEWAY_CERT_PATH=$PWD/tools/dev/cert/tls.crt \
 SERVICE_TOKEN_PATH=$PWD/tools/dev/cert/service-token \
@@ -526,7 +586,12 @@ Add monitoring stack to your deployment:
    ```bash
    # Regenerate development certificates
    make -C tools/dev generate-tls-certificate
+   make -C tools/dev generate-postgres-tls-certificate
    make -C tools/dev generate-oauth
+
+   # Running containers keep the certificates they were created with
+   # (the files are bind-mounted individually), so recreate the stack
+   make docker-compose-down && make docker-compose-up
    ```
 
 3. **Service Health Issues**

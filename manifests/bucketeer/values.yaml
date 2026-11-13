@@ -42,27 +42,41 @@ global:
   operationalDatabase:
     type: mysql
     mysql:
+      # Leave empty to read the user name from `existingSecret` below.
       user: ""
       # Rendered into a chart-managed Secret and injected through secretKeyRef.
       pass: ""
       # Existing Secret to read the password from instead of `pass`. When set,
-      # `pass` is ignored. Each chart can override both values under its own
+      # the pods no longer read `pass`, and when `user` is empty the user name
+      # is read from the same Secret under `existingSecretUserKey`. To switch a
+      # running release, set `existingSecret` first and remove `pass` once the
+      # pods have been replaced: the chart-managed Secret keeps the password
+      # for as long as `pass` is set, so that the previous pods can still
+      # start. Each chart can override these values under its own
       # env.operationalDatabase.mysql.
       existingSecret: ""
       existingSecretKey: "mysql-pass"
+      existingSecretUserKey: "mysql-user"
       host: ""
       port: 3306
       name: ""
       openConns: 50
     postgres:
+      # Leave empty to read the user name from `existingSecret` below.
       user: ""
       # Rendered into a chart-managed Secret and injected through secretKeyRef.
       pass: ""
       # Existing Secret to read the password from instead of `pass`. When set,
-      # `pass` is ignored. Each chart can override both values under its own
+      # the pods no longer read `pass`, and when `user` is empty the user name
+      # is read from the same Secret under `existingSecretUserKey`. To switch a
+      # running release, set `existingSecret` first and remove `pass` once the
+      # pods have been replaced: the chart-managed Secret keeps the password
+      # for as long as `pass` is set, so that the previous pods can still
+      # start. Each chart can override these values under its own
       # env.operationalDatabase.postgres.
       existingSecret: ""
       existingSecretKey: "postgres-pass"
+      existingSecretUserKey: "postgres-user"
       host: ""
       port: 5432
       name: ""
@@ -175,6 +189,8 @@ global:
           body: '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="x-apple-disable-message-reformatting"><title>Bucketeerへのご招待</title></head><body style="margin:0;padding:0;background:#f5f5f5;color:#333;font-family:-apple-system,BlinkMacSystemFont,''Segoe UI'',Roboto,Helvetica,Arial,sans-serif;line-height:1.6;"><div style="display:none;overflow:hidden;line-height:1px;opacity:0;max-height:0;max-width:0;">アカウントに設定されている認証方法でサインインしてください。</div><table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%"><tr><td align="center" style="padding:24px 12px;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="width:100%;max-width:600px;background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);"><tr><td style="padding:32px;background:#ffffff;"><img src="{{webConsoleEndpoint}}/img/bucketeer-logo-primary.png" alt="Bucketeer" width="205" height="48" style="display:block;margin-bottom:24px;" /><p style="margin:0 0 16px 0;font-size:15px;color:#4b5563;">{{userEmail}} 様、</p><p style="margin:0 0 16px 0;font-size:15px;color:#4b5563;">フィーチャーフラグ & A/B テストプラットフォーム「<strong>Bucketeer</strong>」への招待が届いています。</p><p style="margin:0 0 20px 0;font-size:15px;color:#4b5563;">以下のボタンよりコンソールへアクセスし、アカウントに設定されている認証方法でサインインしてください。</p><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 20px 0;"><tr><td align="center"><a href="{{webConsoleEndpoint}}" style="background:#5B21B6;color:#ffffff;text-decoration:none;padding:14px 32px;border-radius:6px;display:inline-block;font-weight:600;font-size:15px;">Bucketeer コンソールを開く</a></td></tr></table><p style="margin:0 0 8px 0;font-size:13px;color:#4b5563;">または、このリンクをブラウザにコピー＆ペーストしてください：</p><table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin:0 0 24px 0;"><tr><td style="padding:12px 16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;word-break:break-all;font-size:13px;color:#4b5563;">{{webConsoleEndpoint}}</td></tr></table><p style="margin:16px 0 0 0;font-size:14px;color:#4b5563;">Bucketeerチーム</p></td></tr></table></td></tr></table></body></html>'
 
 migration:
+  # Set to false to skip the migration Job, e.g. when another release already migrates the same database.
+  enabled: true
   image:
     # MySQL: bucketeer-migration. PostgreSQL: ghcr.io/bucketeer-io/bucketeer-migration-postgres (see migration/Dockerfile.postgres).
     repository: ghcr.io/bucketeer-io/bucketeer-migration
@@ -186,7 +202,19 @@ migration:
 
   # URL to access the DB to do the migration
   # E.g. mysql://user:password@host:port/db_name
+  # The URL is passed to the migration job as a plain argument, so anyone who
+  # can read the Job or the Helm release can read the password. Prefer
+  # `existingSecret` below.
   dbUrl:
+  # Existing Secret to read the URL from instead of `dbUrl`. When set, `dbUrl`
+  # is ignored. The migration job is a pre-install/pre-upgrade hook, so the
+  # Secret must already exist in the release namespace when Helm runs.
+  # Percent-encode special characters in the user name and password.
+  existingSecret: ""
+  existingSecretKey: "db-url"
+
+  # Schema holding the atlas revision history. Leave empty to use atlas' default (atlas_schema_revisions).
+  revisionsSchema: public
 
   # The migration baseline
   # First revision
